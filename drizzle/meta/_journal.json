@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1790526710736,
+      "tag": "0000_hard_franklin_storm",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1790552176510,
+      "tag": "0001_charming_warstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1790553590120,
+      "tag": "0002_minor_logan",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1790555408371,
+      "tag": "0003_mighty_eddie_brock",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1790876431988,
+      "tag": "0004_cold_wallflower",
+      "breakpoints": true
+    }
+  ]
+}

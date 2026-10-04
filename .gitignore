@@ -1,0 +1,14 @@
+node_modules
+.next
+.env*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.tsbuildinfo
+data/*.db*
+data/.credentials.key
+data/logs/
+coverage
+*.log
+.DS_Store

@@ -1,0 +1,80 @@
+"use client";
+
+import { Copy, FileText, Plus, Save, Trash2, UserRoundCheck, WandSparkles } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
+import type { CandidateProfile } from "@/entities/types";
+import { inferRolePreset, profileFromResume, ROLE_PRESETS, type RolePresetKey } from "@/entities/profile-presets";
+import { Badge } from "@/shared/ui/badge";
+import { Button } from "@/shared/ui/button";
+import { HelpTooltip } from "@/shared/ui/help-tooltip";
+
+const listKeys = ["targetTitles", "strongSkills", "secondarySkills", "strongDomains", "proofPoints", "positiveKeywords", "negativeKeywords", "hardStopKeywords", "preferredLocations", "allowedRemoteRegions", "languages"] as const;
+type ListKey = (typeof listKeys)[number];
+
+const listMeta: Record<ListKey, { label: string; hint: string }> = {
+  targetTitles: { label: "Целевые роли", hint: "Названия должностей, которые ты реально рассматриваешь. Они сильнее всего влияют на совпадение вакансии с профилем." },
+  strongSkills: { label: "Сильные навыки", hint: "Технологии и навыки, которые можешь уверенно подтвердить на интервью и примерами из опыта." },
+  secondarySkills: { label: "Дополнительные навыки", hint: "То, с чем работал, но не хочешь позиционировать как главную экспертизу." },
+  strongDomains: { label: "Домены", hint: "Отрасли и типы продуктов: fintech, SaaS, e-commerce, highload и т.п." },
+  proofPoints: { label: "Доказательства результата", hint: "Короткие правдивые достижения с контекстом и цифрами. AI использует их в персональном отклике; ничего не выдумывает." },
+  positiveKeywords: { label: "Плюс-слова", hint: "Слова вакансии, которые должны повышать оценку: например remote, TypeScript, product." },
+  negativeKeywords: { label: "Минус-слова", hint: "Нежелательные условия, которые снижают оценку, но не исключают вакансию полностью." },
+  hardStopKeywords: { label: "Стоп-слова", hint: "Условия, при которых вакансию не стоит рекомендовать: office only, relocation required и т.п." },
+  preferredLocations: { label: "Желаемые локации", hint: "Страны, города или Remote, которые подходят тебе для работы." },
+  allowedRemoteRegions: { label: "Допустимые регионы remote", hint: "Ограничения найма, с которыми ты совместим: worldwide, EMEA, Europe и т.п." },
+  languages: { label: "Рабочие языки", hint: "Языки, на которых готов ежедневно общаться, проходить интервью и вести рабочую переписку." },
+};
+
+export function ProfilesClient({ initialProfiles }: { initialProfiles: CandidateProfile[] }) {
+  const router = useRouter();
+  const [profiles, setProfiles] = useState(initialProfiles);
+  const [selectedId, setSelectedId] = useState(initialProfiles.find((item) => item.isActive)?.id ?? initialProfiles[0]?.id);
+  const [draft, setDraft] = useState<CandidateProfile | null>(initialProfiles.find((item) => item.id === selectedId) ?? null);
+  const [presetKey, setPresetKey] = useState<RolePresetKey>(() => inferRolePreset((initialProfiles.find((item) => item.isActive)?.targetTitles ?? []).join(" ")));
+  const [resumeText, setResumeText] = useState("");
+  const [message, setMessage] = useState("");
+  const choose = (profile: CandidateProfile) => { setSelectedId(profile.id); setDraft(structuredClone(profile)); setPresetKey(inferRolePreset([...profile.targetTitles, ...profile.strongSkills].join(" "))); setMessage(""); };
+  const set = <K extends keyof CandidateProfile>(key: K, value: CandidateProfile[K]) => setDraft((current) => current ? { ...current, [key]: value } : current);
+  const setList = (key: ListKey, value: string) => set(key, value.split(",").map((item) => item.trim()).filter(Boolean));
+  function applyPreset() {
+    if (!draft) return;
+    const preset = ROLE_PRESETS[presetKey];
+    const fields = Object.fromEntries(Object.entries(preset).filter(([key]) => !["key", "label", "description"].includes(key))) as Omit<typeof preset, "key" | "label" | "description">;
+    setDraft({ ...draft, ...fields, id: draft.id, name: draft.name === "New candidate" ? preset.label : draft.name, isActive: draft.isActive });
+    setMessage(`Шаблон «${preset.label}» применён. Проверь поля и сохрани профиль.`);
+  }
+  function buildFromResume() {
+    if (!draft || resumeText.trim().length < 30) { setMessage("Вставь хотя бы 30 символов резюме, чтобы определить направление."); return; }
+    const result = profileFromResume(resumeText, draft);
+    setPresetKey(result.presetKey);
+    setDraft(result.profile);
+    setMessage(`Профиль собран как «${ROLE_PRESETS[result.presetKey].label}». Проверь предложенные навыки, языки и доказательства.`);
+  }
+  async function save() {
+    if (!draft) return;
+    const response = await fetch("/api/profiles", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(draft) });
+    const result = await response.json() as { error?: string };
+    if (!response.ok) { setMessage(result.error || "Could not save profile"); return; }
+    setProfiles((current) => current.some((item) => item.id === draft.id) ? current.map((item) => item.id === draft.id ? draft : item) : [...current, draft]);
+    setMessage("Profile saved and all vacancies rescored."); router.refresh();
+  }
+  async function activate(profile: CandidateProfile) {
+    await fetch("/api/profiles", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: profile.id }) });
+    setProfiles((current) => current.map((item) => ({ ...item, isActive: item.id === profile.id }))); setDraft({ ...profile, isActive: true }); setSelectedId(profile.id); router.refresh();
+  }
+  function clone() { if (!draft) return; const copy = { ...structuredClone(draft), id: crypto.randomUUID(), name: `${draft.name} copy`, isActive: false }; setDraft(copy); setSelectedId(copy.id); setMessage("Edit the copy, then save it."); }
+  function create() { const preset = ROLE_PRESETS[presetKey]; const fields = Object.fromEntries(Object.entries(preset).filter(([key]) => !["key", "label", "description"].includes(key))) as Omit<typeof preset, "key" | "label" | "description">; const profile: CandidateProfile = { id: crypto.randomUUID(), name: preset.label, ...fields, isActive: false }; setDraft(profile); setSelectedId(profile.id); setMessage("Шаблон профиля готов. Проверь его и сохрани."); }
+  async function remove() { if (!draft || profiles.length <= 1 || !profiles.some((item) => item.id === draft.id)) return; if (!window.confirm(`Delete ${draft.name}? Scores and applications for this profile will also be removed.`)) return; const response = await fetch(`/api/profiles?id=${draft.id}`, { method: "DELETE" }); if (!response.ok) return; const remaining = profiles.filter((item) => item.id !== draft.id); setProfiles(remaining); choose(remaining[0]); router.refresh(); }
+
+  return <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)]"><aside className="space-y-3"><Button variant="primary" className="w-full" onClick={create}><Plus size={16} /> New profile</Button>{profiles.map((profile) => <button key={profile.id} onClick={() => choose(profile)} className={`focus-ring panel w-full p-4 text-left transition ${selectedId === profile.id ? "border-[var(--accent)]" : "hover:bg-[var(--panel-2)]"}`}><div className="flex items-center gap-2"><span className="font-black">{profile.name}</span>{profile.isActive && <Badge tone="good">ACTIVE</Badge>}</div><div className="mt-1 text-sm text-[var(--muted)]">{profile.yearsExperience} years · {profile.remotePreference} · {profile.salaryTarget} {profile.salaryCurrency}</div><div className="mt-3 flex flex-wrap gap-1">{profile.strongSkills.slice(0, 4).map((skill) => <Badge key={skill}>{skill}</Badge>)}</div></button>)}</aside>
+    {draft && <section className="panel p-5 md:p-6"><div className="flex flex-wrap items-start justify-between gap-3 border-b pb-5"><div><h2 className="text-lg font-black">Candidate profile</h2><p className="text-sm text-[var(--muted)]">Every saved profile gets its own score for every vacancy.</p></div><div className="flex flex-wrap gap-2"><Button size="sm" onClick={clone}><Copy size={15} /> Clone</Button>{!draft.isActive && profiles.some((item) => item.id === draft.id) && <Button size="sm" onClick={() => activate(draft)}><UserRoundCheck size={15} /> Make active</Button>}<Button size="sm" variant="danger" onClick={remove} disabled={profiles.length <= 1 || !profiles.some((item) => item.id === draft.id)}><Trash2 size={15} /></Button></div></div>
+      <section className="mt-5 rounded-lg border border-[var(--accent)]/30 bg-[var(--accent-soft)] p-4"><div className="flex items-start gap-3"><WandSparkles className="mt-0.5 shrink-0 text-[var(--accent)]" size={18} /><div className="min-w-0 flex-1"><h3 className="font-black">Быстрая настройка под цель</h3><p className="mt-1 text-sm leading-6 text-[var(--muted)]">Выбери направление или вставь резюме. Распознавание работает локально в браузере: текст никуда не отправляется.</p><div className="mt-3 grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]"><select value={presetKey} onChange={(event) => setPresetKey(event.target.value as RolePresetKey)} className="focus-ring h-10 rounded-md border bg-[var(--panel)] px-3">{Object.values(ROLE_PRESETS).map((preset) => <option key={preset.key} value={preset.key}>{preset.label} — {preset.description}</option>)}</select><Button onClick={applyPreset}><WandSparkles size={15} /> Применить шаблон</Button></div><label className="mt-3 block"><span className="mb-1 flex items-center gap-1 text-sm font-bold"><FileText size={15} /> Или вставь текст резюме <HelpTooltip text="Можно вставить plain text из PDF/DOCX. Приложение локально определит направление, навыки, языки и строки с измеримыми результатами." /></span><textarea value={resumeText} onChange={(event) => setResumeText(event.target.value)} className="focus-ring min-h-24 w-full rounded-md border bg-[var(--panel)] p-3 text-sm" placeholder="Senior Frontend Engineer… React, TypeScript… сократил время загрузки на 40%" /></label><Button className="mt-2" size="sm" onClick={buildFromResume}><FileText size={15} /> Собрать профиль по резюме</Button></div></div></section>
+      <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3"><label><span className="mb-1 flex items-center gap-1 text-sm font-bold">Название профиля <HelpTooltip text="Можно создать разные профили под разные направления, например Frontend и Full-stack. Активный профиль управляет текущим рейтингом." /></span><input value={draft.name} onChange={(e) => set("name", e.target.value)} className="focus-ring h-10 w-full rounded-md border bg-[var(--panel)] px-3" /></label><label><span className="mb-1 flex items-center gap-1 text-sm font-bold">Опыт, лет <HelpTooltip text="Реальный коммерческий опыт. Он сравнивается с требованиями вакансии." /></span><input type="number" step="0.5" value={draft.yearsExperience} onChange={(e) => set("yearsExperience", Number(e.target.value))} className="focus-ring h-10 w-full rounded-md border bg-[var(--panel)] px-3" /></label><label><span className="mb-1 flex items-center gap-1 text-sm font-bold">Текущая локация <HelpTooltip text="Помогает проверить регион найма, релокацию и часовые пояса." /></span><input value={draft.location} onChange={(e) => set("location", e.target.value)} className="focus-ring h-10 w-full rounded-md border bg-[var(--panel)] px-3" /></label><label><span className="mb-1 flex items-center gap-1 text-sm font-bold">Формат работы <HelpTooltip text="Предпочтение remote, hybrid или office влияет на оценку вакансии." /></span><select value={draft.remotePreference} onChange={(e) => set("remotePreference", e.target.value as CandidateProfile["remotePreference"])} className="focus-ring h-10 w-full rounded-md border bg-[var(--panel)] px-3"><option value="remote">Remote</option><option value="hybrid">Hybrid</option><option value="onsite">Onsite</option><option value="any">Any</option></select></label><label><span className="mb-1 flex items-center gap-1 text-sm font-bold">Целевая зарплата в месяц <HelpTooltip text="Желаемая месячная сумма в валюте профиля; годовые и почасовые вилки вакансий приложение приводит к месяцу." /></span><input type="number" value={draft.salaryTarget} onChange={(e) => set("salaryTarget", Number(e.target.value))} className="focus-ring h-10 w-full rounded-md border bg-[var(--panel)] px-3" /></label><label><span className="mb-1 flex items-center gap-1 text-sm font-bold">Минимальная зарплата в месяц <HelpTooltip text="Ниже этой суммы вакансия получает hard stop. Валюты не конвертируются по выдуманному курсу." /></span><input type="number" value={draft.salaryFloor} onChange={(e) => set("salaryFloor", Number(e.target.value))} className="focus-ring h-10 w-full rounded-md border bg-[var(--panel)] px-3" /></label><label><span className="mb-1 flex items-center gap-1 text-sm font-bold">Валюта зарплаты <HelpTooltip text="Валюта месячной цели и минимума. Если в вакансии другая валюта, приложение предупредит, но не поставит ложный hard stop." /></span><select value={draft.salaryCurrency} onChange={(e) => set("salaryCurrency", e.target.value)} className="focus-ring h-10 w-full rounded-md border bg-[var(--panel)] px-3"><option value="USD">USD</option><option value="EUR">EUR</option><option value="GBP">GBP</option><option value="RUB">RUB</option><option value="GEL">GEL</option></select></label></div>
+      <section className="mt-6 rounded-lg border bg-[var(--panel-2)] p-4"><div className="grid gap-4 md:grid-cols-[1fr_260px]"><label><span className="mb-1 flex items-center gap-1 text-sm font-bold">Рабочие языки <HelpTooltip text={listMeta.languages.hint} /></span><input value={draft.languages.join(", ")} onChange={(event) => setList("languages", event.target.value)} className="focus-ring h-10 w-full rounded-md border bg-[var(--panel)] px-3" placeholder="Russian, English B2" /><span className="mt-1 block text-xs text-[var(--muted)]">Указывай только языки, на которых готов ежедневно работать.</span></label><label><span className="mb-1 flex items-center gap-1 text-sm font-bold">Языковая политика <HelpTooltip text="Строго: несовместимый обязательный язык становится hard stop. Гибко: вакансия остаётся в выдаче с предупреждением." /></span><select value={draft.languagePolicy ?? "strict"} onChange={(event) => set("languagePolicy", event.target.value as CandidateProfile["languagePolicy"])} className="focus-ring h-10 w-full rounded-md border bg-[var(--panel)] px-3"><option value="strict">Строго — исключать несовпадения</option><option value="flexible">Гибко — только предупреждать</option></select></label></div></section>
+      <div className="mt-6 grid gap-4 md:grid-cols-2">{listKeys.filter((key) => key !== "languages").map((key) => <label key={key}><span className="mb-1 flex items-center gap-1 text-sm font-bold">{listMeta[key].label} <HelpTooltip text={`${listMeta[key].hint} Вводи значения через запятую.`} /></span><textarea value={draft[key].join(", ")} onChange={(event) => setList(key, event.target.value)} className="focus-ring min-h-20 w-full rounded-md border bg-[var(--panel)] p-3 text-sm" /></label>)}</div>
+      <div className="mt-6"><h3 className="flex items-center gap-2 font-black">Веса рейтинга <HelpTooltip text="Чем больше число, тем сильнее этот фактор влияет на итоговый FIT. Если не уверен — оставь значения по умолчанию." /></h3><p className="text-sm text-[var(--muted)]">Относительная важность факторов; итоговая оценка ограничена 100.</p><div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">{Object.entries(draft.weights).map(([key, value]) => <label key={key}><span className="mb-1 block text-xs font-bold text-[var(--muted)]">{key.replace("Match", "")}</span><input type="number" value={value} onChange={(event) => set("weights", { ...draft.weights, [key]: Number(event.target.value) })} className="focus-ring h-10 w-full rounded-md border bg-[var(--panel)] px-2" /></label>)}</div></div>
+      {message && <p className="mt-4 text-sm font-semibold text-[var(--accent)]">{message}</p>}<Button variant="primary" className="mt-5" onClick={save}><Save size={16} /> Save and rescore</Button>
+    </section>}
+  </div>;
+}
